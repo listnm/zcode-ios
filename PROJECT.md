@@ -2,7 +2,7 @@
 
 > 项目代号：`zcode-ios`（产品形态：类「百度搭子」的工作区 Agent）
 > 建立：2026-11-20
-> 当前状态：**模块 A–D 代码完成，CI 流水线已配置（未签名 IPA + 可选签名 IPA）；等待真机验证**
+> 当前状态：**模块 A–D 代码完成；CI 首次构建通过（run #2），未签名 arm64 IPA 已产出；等待真机安装验证**
 
 ---
 
@@ -94,6 +94,11 @@
   R13 报告误判（actor 内 `await` 冗余）→ 不采纳；
   R14 「用户停止」与「流自然断开」混为一谈 → `didUserStop` 区分终态。
   结构检查 `scripts/lint_structure.py`：27 文件 0 问题；三个 YAML 均通过 `yaml.safe_load`。
+
+- 2026-11-20：**首次上云构建**。源码推送到 <https://github.com/listnm/zcode-ios>（无 git 环境，走 Git Data API 的 `scripts/push_to_github.py`）。
+  run #1 失败并暴露一个真实编译错误：`AppEnvironment.swift:36:16 property cannot be declared public because its type uses an internal type`（`selectedTab: RootTab` 而 `RootTab` 是 internal）→ 把 `RootTab` 改为 `public`，提交 `346378aab9`。
+  run #2 **成功**：`xcodebuild -sdk iphoneos` 产出 `ZCodeiOS.app`（arm64，二进制 1.74 MB）并打包为 `ZCode-unsigned.ipa`（454 526 字节），artifact 名 `ZCode-unsigned-ipa`，已由 `scripts/download_ipa.py` 取回到 `dist/`。
+  附带修掉脚本侧两处平台问题：空仓库上 Git Data API 返回 409（不是 404）需先做引导提交；artifact 的 SAS 重定向不能带 `Authorization` 头。
 
 ## 8. 有意偏离登记（相对 ZCode）
 

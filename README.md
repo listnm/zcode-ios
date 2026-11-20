@@ -6,6 +6,13 @@
 - 语言 / 工具链：Swift 5.9+，Xcode 15.4+，工程由 [XcodeGen](https://github.com/yonaskolb/XcodeGen) 从 `project.yml` 生成
 - 无第三方依赖：Keychain、URLSession、SwiftUI、Foundation 全部来自系统 SDK
 
+## 仓库与构建
+
+- 源码仓库：<https://github.com/listnm/zcode-ios>
+- 构建流水线：GitHub Actions（`macos-15`）→ `xcodegen generate` → `xcodebuild -sdk iphoneos CODE_SIGNING_ALLOWED=NO` → 打包 `Payload/` 成 `ZCode-unsigned.ipa`
+- 最近一次构建：**成功**（run #2）。产出的 `ZCode-unsigned.ipa` 是 **arm64 设备包、未签名**，可直接用在自签工具里，但**不能直接装到 iPhone 上**——iOS 要求每个 App 都有有效签名。
+- 本地（macOS）构建：`xcodegen generate && open ZCodeiOS.xcodeproj`，在 Xcode 里选真机 + 自己的开发者账号即可正常签名安装。
+
 ## 它做什么
 
 1. 选择工作区（`UIDocumentPicker` 的文件夹模式），拿到 security-scoped 访问权；
