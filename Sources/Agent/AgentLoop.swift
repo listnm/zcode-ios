@@ -82,7 +82,10 @@ public struct AgentLoop: Sendable {
                             case .finished(_, let usage):
                                 // 用量单独上报：UI 要显示"这一轮烧了多少 token"，
                                 // 但不能把它混进终态，否则终态会被覆盖成非终态。
-                                continuation.yield(.usage(usage))
+                                // usage 是可选值：服务端没回 usage 时不上报。
+                                if let usage {
+                                    continuation.yield(.usage(usage))
+                                }
                                 // 只在闭合信号之后才允许提交调用（见累加器注释）。
                                 break
                             }
