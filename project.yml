@@ -1,0 +1,56 @@
+# XcodeGen spec. Run `xcodegen generate` on macOS to produce ZCodeiOS.xcodeproj.
+# NOTE: plain-ASCII comments on purpose — this file is written on Windows and
+# must round-trip without an encoding assumption.
+name: ZCodeiOS
+
+options:
+  bundleIdPrefix: com.zcodeios
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    # All mutable state must live inside an actor or @MainActor.
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+
+targets:
+  ZCodeiOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: ZCode
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zcodeios.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        CODE_SIGN_STYLE: Automatic
+
+schemes:
+  ZCodeiOS:
+    build:
+      targets:
+        ZCodeiOS: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,31 @@
+# Xcode
+build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcarchive
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Fastlane / signing material must never be committed
+*.p12
+*.mobileprovision
+ExportOptions.plist
+cert.p12
+profile.mobileprovision
+
+# macOS
+.DS_Store
+
+# Local scratch files
+_diag.py
+_enc_probe.swift
+build.log
+archive.log
+export.log
+
+# Python tooling
+__pycache__/
+*.pyc

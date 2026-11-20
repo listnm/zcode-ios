@@ -1,0 +1,129 @@
+name: Build signed IPA (manual)
+
+# Produces an installable .ipa when signing material is supplied as repository secrets.
+# Required secrets:
+#   BUILD_CERT_P12_BASE64        - base64 of a .p12 containing "Apple Development" or
+#                                  "Apple Distribution" cert + private key
+#   BUILD_CERT_PASSWORD          - password of that .p12
+#   PROVISIONING_PROFILE_BASE64  - base64 of the .mobileprovision for com.zcodeios.app
+#   TEAM_ID                      - 10-character Apple Team ID
+# Optional secrets:
+#   BUNDLE_ID                    - overrides com.zcodeios.app
+#
+# Without these secrets the job stops early with a readable message; use
+# build-ipa.yml for an unsigned build instead.
+
+on:
+  workflow_dispatch:
+
+env:
+  CERT_P12: ${{ secrets.BUILD_CERT_P12_BASE64 }}
+  CERT_PASSWORD: ${{ secrets.BUILD_CERT_PASSWORD }}
+  PROFILE: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+  TEAM_ID: ${{ secrets.TEAM_ID }}
+  BUNDLE_ID: ${{ secrets.BUNDLE_ID }}
+
+jobs:
+  signed:
+    name: Archive + export signed IPA
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify signing secrets exist
+        run: |
+          missing=0
+          for name in CERT_P12 CERT_PASSWORD PROFILE TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::secret $name is empty"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Signing secrets are missing. Use the unsigned workflow (build-ipa.yml) instead."
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: |
+          brew update >/dev/null 2>&1 || true
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Import signing certificate
+        run: |
+          KEYCHAIN=build-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo "$CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+      - name: Install provisioning profile
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$PROFILE" | base64 --decode > profile.mobileprovision
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< "$(security cms -D -i profile.mobileprovision)")
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/"$PROFILE_UUID".mobileprovision
+          echo "PROFILE_SPECIFIER=$(/usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin <<< "$(security cms -D -i profile.mobileprovision)")" >> "$GITHUB_ENV"
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project ZCodeiOS.xcodeproj \
+            -scheme ZCodeiOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/ZCodeiOS.xcarchive \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID:-com.zcodeios.app}" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_SPECIFIER" | tee archive.log
+
+      - name: Write ExportOptions
+        run: |
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>development</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>stripSwiftSymbols</key><true/>
+            <key>compileBitcode</key><false/>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/ZCodeiOS.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist | tee export.log
+          ls -lh build/export
+
+      - name: Upload signed IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZCode-signed-ipa
+          path: build/export/*.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain build-signing.keychain-db 2>/dev/null || true
+          rm -f cert.p12 profile.mobileprovision

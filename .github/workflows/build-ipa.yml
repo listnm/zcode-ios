@@ -1,0 +1,72 @@
+name: Build iOS app and package IPA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (unsigned) + package IPA
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install XcodeGen
+        run: |
+          brew update >/dev/null 2>&1 || true
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for device (no code signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ZCodeiOS.xcodeproj \
+            -scheme ZCodeiOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee build.log
+
+      - name: Package .ipa
+        run: |
+          APP_PATH="build/Build/Products/Release-iphoneos/ZCodeiOS.app"
+          test -d "$APP_PATH" || { echo "app bundle missing"; exit 1; }
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry ZCode-unsigned.ipa Payload
+          ls -lh ZCode-unsigned.ipa
+          unzip -l ZCode-unsigned.ipa | head -20
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZCode-unsigned-ipa
+          path: ZCode-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
