@@ -65,7 +65,11 @@ def main() -> int:
         print("ERROR: 没有可下载的 artifact（可能还没跑过成功构建）", file=sys.stderr)
         return 3
 
-    artifact = next((a for a in artifacts if a["name"].startswith("ZCode")), artifacts[0])
+    # 接口返回顺序不保证是最新在前（实测按 id 升序），所以显式按 created_at 取最新。
+    candidates = [a for a in artifacts if a["name"].startswith("ZCode")]
+    if not candidates:
+        candidates = artifacts
+    artifact = max(candidates, key=lambda a: a["created_at"])
     print(f"artifact: {artifact['name']} ({artifact['size_in_bytes']} bytes, id={artifact['id']})")
 
     archive = zipfile.ZipFile(io.BytesIO(get(f"{API}/repos/{OWNER}/{REPO}/actions/artifacts/{artifact['id']}/zip")))
