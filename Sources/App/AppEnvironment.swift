@@ -12,6 +12,8 @@ import Observation
 ///       ├─ WorkspaceModel        (MainActor，UI 镜像)
 ///       ├─ ProviderStore         (MainActor，Provider 配置 + Keychain 句柄)
 ///       ├─ SessionStore          (actor，消息历史持久化)
+///       ├─ SkillStore            (MainActor，可复用提示词技能)
+///       ├─ PluginStore           (MainActor，插件：提示词扩展 + 工具白名单)
 ///       ├─ ChatModel             (MainActor，对话状态机 + Agent 循环驱动)
 ///       └─ [AgentTool]           (薄壳，注入上面几个依赖)
 ///
@@ -27,6 +29,8 @@ public final class AppEnvironment {
     public let workspace: WorkspaceModel
     public let providers: ProviderStore
     public let sessions: SessionStore
+    public let skills: SkillStore
+    public let plugins: PluginStore
     public let chat: ChatModel
     public let tools: [any AgentTool]
 
@@ -48,6 +52,8 @@ public final class AppEnvironment {
             confirmations: confirmations
         )
         let tools = WorkspaceToolFactory.makeAll(dependencies: dependencies)
+        let skills = SkillStore()
+        let plugins = PluginStore()
 
         self.scope = scope
         self.fileSystem = fileSystem
@@ -55,8 +61,16 @@ public final class AppEnvironment {
         self.workspace = WorkspaceModel(scope: scope)
         self.providers = providers
         self.sessions = sessions
+        self.skills = skills
+        self.plugins = plugins
         self.tools = tools
-        self.chat = ChatModel(providers: providers, sessions: sessions, tools: tools)
+        self.chat = ChatModel(
+            providers: providers,
+            sessions: sessions,
+            tools: tools,
+            skills: skills,
+            plugins: plugins
+        )
     }
 
     /// 按名字查工具。Agent 循环执行 tool_call 时用（未知名字 → nil → 产出配对错误结果）。

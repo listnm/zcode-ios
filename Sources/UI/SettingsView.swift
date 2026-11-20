@@ -41,6 +41,36 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("扩展") {
+                NavigationLink {
+                    SkillsView()
+                } label: {
+                    SettingsRow(
+                        icon: "lightbulb",
+                        title: "技能",
+                        subtitle: environment.skills.enabledSkills.isEmpty
+                            ? "未启用（可添加可复用做法）"
+                            : "\(environment.skills.enabledSkills.count) 个已启用 / 共 \(environment.skills.skills.count) 个",
+                        tint: environment.skills.enabledSkills.isEmpty ? .secondary : .accentColor,
+                        showWarning: false
+                    )
+                }
+
+                NavigationLink {
+                    PluginsView()
+                } label: {
+                    SettingsRow(
+                        icon: "puzzlepiece.extension",
+                        title: "插件",
+                        subtitle: environment.plugins.enabledPlugins.isEmpty
+                            ? "未启用（提示词扩展 + 工具白名单）"
+                            : "\(environment.plugins.enabledPlugins.count) 个已启用",
+                        tint: environment.plugins.enabledPlugins.isEmpty ? .secondary : .accentColor,
+                        showWarning: false
+                    )
+                }
+            }
+
             Section("关于") {
                 LabeledContent("版本", value: Self.versionText)
                 LabeledContent("Agent 循环", value: "回合制，最多 \(environment.chat.maxTurnsLimit) 轮")

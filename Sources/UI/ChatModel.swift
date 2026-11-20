@@ -49,16 +49,22 @@ public final class ChatModel {
     private let sessions: SessionStore
     private let tools: [any AgentTool]
     private let maxTurns: Int
+    private let skills: SkillStore
+    private let plugins: PluginStore
 
     public init(
         providers: ProviderStore,
         sessions: SessionStore,
         tools: [any AgentTool],
+        skills: SkillStore,
+        plugins: PluginStore,
         maxTurns: Int = 20
     ) {
         self.providers = providers
         self.sessions = sessions
         self.tools = tools
+        self.skills = skills
+        self.plugins = plugins
         self.maxTurns = maxTurns
         self.selection = providers.defaultSelection
 
@@ -245,16 +251,34 @@ public final class ChatModel {
 
         let history = messages
         // 计划模式下只交出只读工具：模型看不见写工具，就不会规划写操作。
-        let activeTools = isPlanMode ? tools.filter { $0.capability.readOnly } : tools
+        var activeTools = isPlanMode ? tools.filter { $0.capability.readOnly } : tools
+        // 插件可以把工具收窄到白名单：这是"插件"在 iOS 上唯一能改变执行面的地方。
+        if let allowed = plugins.allowedToolNames {
+            activeTools = activeTools.filter { allowed.contains($0.capability.name) }
+        }
         let toolNames = activeTools.map { $0.capability.name }.joined(separator: "、")
+
+        var systemPrompt = AgentPrompts.systemPrompt(
+            workspaceName: workspaceName ?? "未命名工作区",
+            toolNames: toolNames
+        )
+        if isPlanMode {
+            systemPrompt += "\n\n当前是计划模式：你只有只读工具。请先调研、读代码、给出可执行方案，不要尝试写入或删除。"
+        }
+        // 顺序固定为 插件 → 技能：插件定义"在什么约束下工作"，技能定义"怎么做一件事"，
+        // 后写的更贴近具体任务，因此技能放在后面覆盖前面的泛化规则。
+        let pluginFragment = plugins.promptFragment
+        if !pluginFragment.isEmpty {
+            systemPrompt += "\n\n" + pluginFragment
+        }
+        let skillFragment = skills.promptFragment
+        if !skillFragment.isEmpty {
+            systemPrompt += "\n\n## 可复用技能\n以下技能是用户预设的做法，与当前任务相关时按其步骤执行。\n" + skillFragment
+        }
+
         let loop = AgentLoop(
             tools: activeTools,
-            systemPrompt: AgentPrompts.systemPrompt(
-                workspaceName: workspaceName ?? "未命名工作区",
-                toolNames: toolNames
-            ) + (isPlanMode
-                ? "\n\n当前是计划模式：你只有只读工具。请先调研、读代码、给出可执行方案，不要尝试写入或删除。"
-                : ""),
+            systemPrompt: systemPrompt,
             maxTurns: maxTurns
         )
 

@@ -117,3 +117,12 @@
 - 计划模式：只在只读工具集合里调度，并在系统提示词里说明。
 - 工具：4 个扩展到 9 个（新增 glob / grep / make_dir / copy_file / move_file），只读在前、写在后。
 - 模型参数：Provider 增加可选 temperature / maxOutputTokens，客户端按需注入。
+
+
+### 技能与插件（m01065）
+
+- 工作区选择「选不到文件夹」：不是授权逻辑问题，是系统选择器的交互（点一行=进入，需点右上角「打开」才选中）与个别提供方只声明 public.directory。ileImporter 的 llowedContentTypes 扩为 [.folder, .directory]，并在未选择状态提供「使用 App 内文件夹」直连 App 容器；WorkspaceModel.adoptAppContainer() 新增；ccessDenied 追加 iCloud 未下载的提示。
+- 技能（Sources/Skills/SkillStore.swift）：SkillDefinition + SkillStore，落盘 Application Support/ZCodeSkills/skills.json，支持 Markdown（含最简 front matter）解析、启停、二次确认删除。
+- 插件（Sources/Plugins/PluginStore.swift）：声明式的「系统提示词追加 + 工具白名单」，落盘 ZCodePlugins/plugins.json；白名单多插件取并集；JSON 导入支持单对象与数组。
+- 接入 Agent：ChatModel 在计划模式过滤之后再按插件白名单收窄工具；系统提示词顺序为 基础 → 计划模式 → 插件 → 技能。
+- UI：SkillsView / PluginsView 与各自编辑器、导入器；设置页新增「扩展」分区。

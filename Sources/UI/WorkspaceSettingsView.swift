@@ -21,9 +21,11 @@ struct WorkspaceSettingsView: View {
         .navigationTitle("工作区")
         .navigationBarTitleDisplayMode(.inline)
         // iOS 14+。只允许选文件夹：Agent 的工作区语义是「一个目录」，不是单个文件。
+        // 同时声明 `.folder` 与 `.directory`：个别文件提供方只声明 public.directory，
+        // 只写 `.folder` 时那些行会变灰、看起来「选不了」。
         .fileImporter(
             isPresented: $showImporter,
-            allowedContentTypes: [.folder],
+            allowedContentTypes: [.folder, .directory],
             allowsMultipleSelection: false
         ) { result in
             handleImport(result)
@@ -71,6 +73,15 @@ struct WorkspaceSettingsView: View {
                 }
                 Button("选择工作区") { showImporter = true }
                     .buttonStyle(.borderedProminent)
+
+                // 绕开系统选择器的捷径。App 容器在「文件」App 里显示为
+                // 「我的 iPhone → ZCode」，对自己容器内的目录不需要任何授权。
+                Button("使用 App 内文件夹（免选择）") {
+                    Task { await environment.workspace.adoptAppContainer() }
+                }
+                Text("会在「文件 → 我的 iPhone → ZCode」下创建「ZCode 工作区」并直接启用。适合不想折腾系统选择器的情况。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if environment.workspace.snapshot.needsReauthorization {
@@ -117,6 +128,13 @@ struct WorkspaceSettingsView: View {
             .foregroundStyle(.secondary)
         } header: {
             Text("关于权限的说明")
+        } footer: {
+            Text("""
+            选择器里的交互：点一行是「进入这个文件夹」，不是「选中它」。\
+            要选中它，请先点进去，再按右上角的「打开」。
+
+            如果某一行是灰的，通常是因为它还在 iCloud 里没下载到本地——先去「文件」App 打开一次。
+            """)
         }
     }
 
