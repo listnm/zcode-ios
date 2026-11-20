@@ -87,7 +87,7 @@ public struct SkillsView: View {
         }
         .fileImporter(
             isPresented: $showFileImporter,
-            allowedContentTypes: [.markdown, .plainText],
+            allowedContentTypes: skillFileTypes,
             allowsMultipleSelection: false
         ) { result in
             handleFileImport(result)
@@ -140,6 +140,20 @@ public struct SkillsView: View {
             ))
             .labelsHidden()
         }
+    }
+
+    /// 技能导入允许的文件类型。
+    ///
+    /// 不直接写 `UTType.markdown`：那个静态成员在 iOS 的 UniformTypeIdentifiers 里没有稳定提供，
+    /// 用扩展名反查更可靠——`.md` 在系统里映射到 `net.daringfireball.markdown`。
+    private var skillFileTypes: [UTType] {
+        var types: [UTType] = [.plainText, .text]
+        for ext in ["md", "markdown"] {
+            if let type = UTType(filenameExtension: ext), !types.contains(type) {
+                types.append(type)
+            }
+        }
+        return types
     }
 
     // MARK: - 文件导入

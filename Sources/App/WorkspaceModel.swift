@@ -74,7 +74,7 @@ public final class WorkspaceModel {
                 create: true
             )
             let target: URL
-            if let subdirectory, !subdirectory.isEmpty {
+            if !subdirectory.isEmpty {
                 target = documents.appendingPathComponent(subdirectory, isDirectory: true)
                 var isDirectory: ObjCBool = false
                 if !fileManager.fileExists(atPath: target.path, isDirectory: &isDirectory) {
