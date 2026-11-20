@@ -153,6 +153,12 @@ open ZCodeiOS.xcodeproj     # 选自己的 Team 后直接 Run
 | `move_file` | 移动 / 重命名 | 否 | 是 |
 | `delete_file` | 删除文件或目录 | 否 | 是 |
 
+**模型配置**
+
+- 只填 Base URL + API Key，点「从地址获取模型列表」即可自动请求 Base URL + /models，把返回的模型填进列表；地址填完、Key 打完后也会自动尝试一次（900ms 防抖）。
+- 拉不到时仍可手打 Model ID，两种方式共存。解析兼容三种响应形状：{"data":[{"id":...}]}（OpenAI / Anthropic）、{"models":[{"name":...}]}（Ollama）、以及直接返回数组的简化网关。
+- 协议按类型自动换鉴权头：OpenAI 兼容用 Authorization: Bearer，Anthropic 用 x-api-key + nthropic-version。
+
 **对话能力**
 
 - 多会话：任意新建、切换、重命名、删除；重启后从本地 JSON 恢复上一次会话。

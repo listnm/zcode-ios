@@ -82,6 +82,11 @@ public extension JSONValue {
         return nil
     }
 
+    /// 读取对象里的一个字段。非对象一律返回 nil，避免调用方到处解包 objectValue。
+    subscript(_ key: String) -> JSONValue? {
+        objectValue?[key]
+    }
+
     var doubleValue: Double? {
         if case .number(let value) = self { return value }
         return nil

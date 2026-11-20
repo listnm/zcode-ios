@@ -133,6 +133,11 @@ struct ProviderEditorView: View {
     @State private var showDataNotice = false
     @State private var pendingSave = false
     @State private var validationError: String?
+    @State private var isFetchingModels = false
+    @State private var fetchMessage: String?
+    @State private var fetchFailed = false
+    /// 自动拉取的防抖任务：用户还在打字时不要每敲一个字符就打一次网络请求。
+    @State private var autoFetchTask: Task<Void, Never>?
 
     let isNew: Bool
 
@@ -192,18 +197,40 @@ struct ProviderEditorView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Text("例如 \(draft.api.defaultBaseURL)。只填到 /v1，路径由 App 补全。")
+                        .onSubmit { fetchModels() }
+                        .onChange(of: draft.baseURL) { _, _ in scheduleAutoFetch() }
+                    Text("例如 \(draft.api.defaultBaseURL)。只填到 /v1，路径由 App 补全。填完地址和 Key 会自动尝试拉取模型列表。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
                 Section("模型") {
+                    Button {
+                        fetchModels()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Label(isFetchingModels ? "正在获取模型列表…" : "从地址获取模型列表",
+                                  systemImage: isFetchingModels ? "arrow.triangle.2.circlepath" : "arrow.down.circle")
+                            Spacer()
+                            if isFetchingModels {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isFetchingModels)
+
+                    if let fetchMessage {
+                        Text(fetchMessage)
+                            .font(.caption2)
+                            .foregroundStyle(fetchFailed ? Color.red : Color.secondary)
+                    }
+
                     TextEditor(text: $modelsText)
                         .frame(minHeight: 88)
                         .font(.system(.body, design: .monospaced))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Text("每行一个 Model ID，例如 gpt-4o-mini / deepseek-chat / claude-sonnet-4-5。第一行会作为默认模型。")
+                    Text("点上面的按钮会自动请求 `Base URL + /models`；拉不到时也可以手打，每行一个 Model ID。第一行会作为默认模型。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -235,6 +262,8 @@ struct ProviderEditorView: View {
                     SecureField(store.hasKey(for: draft.id) ? "已保存，留空表示不修改" : "API Key", text: $apiKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .onSubmit { maybeAutoFetch() }
+                        .onChange(of: apiKey) { _, _ in scheduleAutoFetch() }
                     if store.hasKey(for: draft.id) {
                         Button("删除已保存的 Key", role: .destructive) {
                             store.setAPIKey("", for: draft.id)
@@ -287,8 +316,80 @@ struct ProviderEditorView: View {
         }
     }
 
+    /// 主动拉取模型列表。用「输入框里刚打的 Key」，没有就用已存到 Keychain 的那把。
+    private func fetchModels() {
+        guard !isFetchingModels else { return }
+        let baseURL = draft.baseURL.trimmingCharacters(in: .whitespaces)
+        guard !baseURL.isEmpty else {
+            fetchFailed = true
+            fetchMessage = "请先填写 Base URL，例如 https://api.deepseek.com/v1。"
+            return
+        }
+
+        let typedKey = apiKey.trimmingCharacters(in: .whitespaces)
+        let storedKey = store.apiKey(for: draft.id) ?? ""
+        let key = typedKey.isEmpty ? storedKey : typedKey
+
+        fetchFailed = false
+        fetchMessage = nil
+        isFetchingModels = true
+
+        Task {
+            do {
+                let models = try await ModelCatalogService.fetchModels(
+                    api: draft.api,
+                    baseURL: baseURL,
+                    apiKey: key
+                )
+                isFetchingModels = false
+                fetchFailed = false
+                modelsText = models.joined(separator: "\n")
+                draft.models = models
+                if draft.defaultModel.isEmpty || !models.contains(draft.defaultModel) {
+                    draft.defaultModel = models.first ?? ""
+                }
+                fetchMessage = key.isEmpty
+                    ? "已获取 \(models.count) 个模型（该地址不要求 API Key）。"
+                    : "已获取 \(models.count) 个模型，第一行已设为默认。"
+            } catch {
+                isFetchingModels = false
+                fetchFailed = true
+                fetchMessage = (error as? LocalizedError)?.errorDescription
+                    ?? "获取模型列表失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// 地址填完整、且手上已有一把 Key 时自动拉一次。
+    ///
+    /// 只在「模型列表还空着、上次也没失败」时触发：否则每次改地址都会打一次请求，
+    /// 而拉失败通常意味着地址或 Key 不对，用户改字的过程中反复失败只是噪音。
+    private func maybeAutoFetch() {
+        guard modelsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !isFetchingModels,
+              !fetchFailed
+        else { return }
+
+        let baseURL = draft.baseURL.trimmingCharacters(in: .whitespaces)
+        guard let url = URL(string: baseURL), url.host != nil else { return }
+
+        let key = apiKey.trimmingCharacters(in: .whitespaces)
+        let hasKey = !key.isEmpty || store.hasKey(for: draft.id)
+        guard hasKey else { return }
+
+        fetchModels()
+    }
+
+    private func scheduleAutoFetch() {
+        autoFetchTask?.cancel()
+        autoFetchTask = Task {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard !Task.isCancelled else { return }
+            maybeAutoFetch()
+        }
+    }
+
     private func save() {
-        // 解析模型列表：每行一个，去空行。
         let models = modelsText
             .split(whereSeparator: { $0 == "\n" || $0 == "," })
             .map { $0.trimmingCharacters(in: .whitespaces) }
