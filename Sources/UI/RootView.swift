@@ -50,8 +50,10 @@ struct RootView: View {
     }
 }
 
-/// 顶部 Tab 的标识。定义在文件作用域，因为组合根也要用它记录选中项。
-enum RootTab: Hashable {
+/// 顶部 Tab 的标识。定义在文件作用域，因为组合根也要用它记录选中项；
+/// 组合根是 public，所以这个类型也必须是 public，否则会报
+/// "property cannot be declared public because its type uses an internal type"。
+public enum RootTab: Hashable {
     case chat
     case settings
 }
