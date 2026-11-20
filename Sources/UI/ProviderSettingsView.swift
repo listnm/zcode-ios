@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Provider 列表 + 编辑。API Key 只以 SecureField 输入、只写 Keychain。
@@ -143,6 +144,34 @@ struct ProviderEditorView: View {
 
     private var store: ProviderStore { environment.providers }
 
+    /// 温度用文本框而不是 Slider：Slider 无法表达"留空 = 用服务端默认"，
+    /// 而"留空"恰恰是跨厂商最安全的默认行为。
+    private var temperatureText: Binding<String> {
+        Binding(
+            get: {
+                guard let value = draft.temperature else { return "" }
+                return String(format: "%g", value)
+            },
+            set: { newValue in
+                let trimmed = newValue
+                    .trimmingCharacters(in: .whitespaces)
+                    .replacingOccurrences(of: "，", with: ".")
+                    .replacingOccurrences(of: ",", with: ".")
+                draft.temperature = trimmed.isEmpty ? nil : Double(trimmed)
+            }
+        )
+    }
+
+    private var maxTokensText: Binding<String> {
+        Binding(
+            get: { draft.maxOutputTokens.map(String.init) ?? "" },
+            set: { newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                draft.maxOutputTokens = trimmed.isEmpty ? nil : Int(trimmed)
+            }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -175,6 +204,29 @@ struct ProviderEditorView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Text("每行一个 Model ID，例如 gpt-4o-mini / deepseek-chat / claude-sonnet-4-5。第一行会作为默认模型。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("生成参数（可选）") {
+                    HStack {
+                        Text("温度")
+                        Spacer()
+                        TextField("默认", text: temperatureText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 90)
+                    }
+                    HStack {
+                        Text("最大输出")
+                        Spacer()
+                        TextField("默认", text: maxTokensText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 90)
+                        Text("tokens").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Text("留空表示不发送该参数，由服务端决定。温度范围 0–2；Anthropic 协议必须给 max_tokens，未填时用 4096。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -249,6 +301,15 @@ struct ProviderEditorView: View {
         guard draft.isValid else {
             // 校验失败时**绝不**触碰 Keychain：否则填错 Base URL 会顺手把已保存的 Key 删掉。
             validationError = "请检查：显示名称非空、Base URL 含 http(s)://、至少一个 Model ID。"
+            return
+        }
+
+        if let temperature = draft.temperature, !(0...2).contains(temperature) {
+            validationError = "温度需要在 0 到 2 之间；留空表示使用服务端默认值。"
+            return
+        }
+        if let maxTokens = draft.maxOutputTokens, maxTokens <= 0 {
+            validationError = "最大输出 token 需要是正整数；留空表示使用默认值。"
             return
         }
 

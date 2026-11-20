@@ -21,6 +21,19 @@ public final class ChatModel {
     public private(set) var outcome: TurnOutcome?
     public private(set) var errorText: String?
 
+    /// 本会话累计用量。只用于展示，不参与任何预算判定。
+    public private(set) var usage = TokenUsage()
+
+    /// 历史会话列表（最近更新在前），供会话抽屉展示。
+    public private(set) var sessionsList: [SessionStore.SessionSummary] = []
+
+    /// 计划模式：只把只读工具交给模型。
+    ///
+    /// 对标 ZCode 的 CollaborationMode.plan——在"先看清楚再动手"的阶段，
+    /// 模型不该有写磁盘的能力。这里用工具白名单实现，比"事后拦截"更可靠：
+    /// 模型看不到写工具，就不会规划出写操作。
+    public var isPlanMode = false
+
     /// 当前会话选择的模型。**只影响本会话**，切换不会改动其他会话或全局默认。
     public var selection: ModelRef?
 
@@ -139,6 +152,68 @@ public final class ChatModel {
         UserDefaults.standard.set(fresh.uuidString, forKey: Self.sessionKey)
     }
 
+    // MARK: - 会话列表
+
+    /// 会话总 token 数（输入 + 输出）。Provider 不回传 usage 时保持 0，不估算。
+    public var totalTokens: Int {
+        (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+    }
+
+    public func refreshSessions() async {
+        sessionsList = await sessions.list()
+    }
+
+    /// 开一个新会话（等价于清空 + 换 id）。
+    public func newSession() async {
+        await resetSession()
+        await refreshSessions()
+    }
+
+    /// 切换到某个历史会话。运行中不允许切换——否则两个回合会写进同一份历史。
+    public func switchTo(session id: UUID) async {
+        guard !isRunning else { return }
+        if id == sessionID {
+            await refreshSessions()
+            return
+        }
+        let restored = await sessions.load(sessionID: id)
+        messages = restored
+        runs = [:]
+        outcome = nil
+        errorText = nil
+        streamingText = ""
+        usage = TokenUsage()
+        sessionID = id
+        UserDefaults.standard.set(id.uuidString, forKey: Self.sessionKey)
+        await refreshSessions()
+    }
+
+    public func deleteSession(_ id: UUID) async {
+        await sessions.clear(sessionID: id)
+        if id == sessionID {
+            await newSession()
+        } else {
+            await refreshSessions()
+        }
+    }
+
+    public func renameSession(_ id: UUID, to title: String) async {
+        await sessions.rename(sessionID: id, title: title)
+        await refreshSessions()
+    }
+
+    /// 重发最后一条用户消息：把这条消息之后的内容全部丢弃（含失败的半截回答），再跑一次。
+    public func regenerate(workspaceName: String?) {
+        guard !isRunning else { return }
+        guard let index = messages.lastIndex(where: { $0.role == .user }) else { return }
+        let text = messages[index].content
+        messages.removeSubrange(index..<messages.count)
+        runs = [:]
+        outcome = nil
+        errorText = nil
+        send(text, workspaceName: workspaceName)
+    }
+
     // MARK: - 发送
 
     public func send(_ text: String, workspaceName: String?) {
@@ -169,13 +244,17 @@ public final class ChatModel {
         messages.append(userMessage)
 
         let history = messages
-        let toolNames = tools.map { $0.capability.name }.joined(separator: "、")
+        // 计划模式下只交出只读工具：模型看不见写工具，就不会规划写操作。
+        let activeTools = isPlanMode ? tools.filter { $0.capability.readOnly } : tools
+        let toolNames = activeTools.map { $0.capability.name }.joined(separator: "、")
         let loop = AgentLoop(
-            tools: tools,
+            tools: activeTools,
             systemPrompt: AgentPrompts.systemPrompt(
                 workspaceName: workspaceName ?? "未命名工作区",
                 toolNames: toolNames
-            ),
+            ) + (isPlanMode
+                ? "\n\n当前是计划模式：你只有只读工具。请先调研、读代码、给出可执行方案，不要尝试写入或删除。"
+                : ""),
             maxTurns: maxTurns
         )
 
@@ -231,6 +310,14 @@ public final class ChatModel {
         case .toolCommitted(let message):
             messages.append(message)
 
+        case .usage(let value):
+            if let input = value.inputTokens {
+                usage.inputTokens = (usage.inputTokens ?? 0) + input
+            }
+            if let output = value.outputTokens {
+                usage.outputTokens = (usage.outputTokens ?? 0) + output
+            }
+
         case .finished(let result):
             finish(outcome: result)
         }
@@ -251,6 +338,8 @@ public final class ChatModel {
 
     private func persist() async {
         await sessions.save(messages: messages, sessionID: sessionID)
+        // 标题由第一条用户消息推导，保存后列表要跟着更新。
+        await refreshSessions()
     }
 
     // MARK: - 取消

@@ -79,7 +79,10 @@ public struct AgentLoop: Sendable {
                                 continuation.yield(.textDelta(delta))
                             case .toolCallDelta:
                                 accumulator.consume(event)
-                            case .finished:
+                            case .finished(_, let usage):
+                                // 用量单独上报：UI 要显示"这一轮烧了多少 token"，
+                                // 但不能把它混进终态，否则终态会被覆盖成非终态。
+                                continuation.yield(.usage(usage))
                                 // 只在闭合信号之后才允许提交调用（见累加器注释）。
                                 break
                             }

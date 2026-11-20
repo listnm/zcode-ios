@@ -8,7 +8,8 @@ import Foundation
 /// - 每个 public 方法开头都重新取一次 resolver，所以工作区被换掉/释放后不会用到陈旧根。
 public actor WorkspaceFileSystem {
 
-    private let scope: WorkspaceScope
+    /// 供同模块的检索扩展（WorkspaceSearch.swift）复用同一份授权边界。
+    let scope: WorkspaceScope
     private let fileManager = FileManager()
 
     /// 列表默认上限，防止模型一个 list 把上下文灌满。

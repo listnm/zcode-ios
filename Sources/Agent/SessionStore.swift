@@ -1,13 +1,13 @@
 import Foundation
 
-/// 会话持久化：把消息历史写成 Application Support 里的 JSON。
+/// 会话持久化：把消息历史写成 Application Support 里的 JSON，并维护一个索引文件。
 ///
 /// 为什么是 JSON 文件而不是 SwiftData：
-/// - 体积小（最近 200 条消息，几十 KB），不需要查询能力；
+/// - 体积小（每个会话最近 200 条消息，几十 KB），不需要查询能力；
 /// - tool_call 与 tool_result 的**顺序与配对**是语义核心，扁平数组最不容易被 ORM 打散；
 /// - 出问题时用户能自己看到文件，便于排查。
 ///
-/// 最低版本：FileManager/ApplicationSupport 目录自 iOS 2.0 起可用。
+/// 最低版本：FileManager / ApplicationSupport 目录自 iOS 2.0 起可用。
 public actor SessionStore {
 
     public struct Payload: Codable, Sendable {
@@ -15,10 +15,26 @@ public actor SessionStore {
         public var updatedAt: Date
     }
 
+    /// 会话列表项。索引与正文分开存：列列表时不必把每个会话的全文都读进内存。
+    public struct SessionSummary: Identifiable, Codable, Sendable, Equatable {
+        public var id: UUID
+        public var title: String
+        public var updatedAt: Date
+        public var messageCount: Int
+
+        public init(id: UUID, title: String, updatedAt: Date, messageCount: Int) {
+            self.id = id
+            self.title = title
+            self.updatedAt = updatedAt
+            self.messageCount = messageCount
+        }
+    }
+
     /// 保留的消息条数上限。裁剪遵守配对规则（见 `trim`）。
     public static let maxMessages = 200
 
     private let directory: URL
+    private static let indexFileName = "index.json"
 
     public init(directory: URL? = nil) {
         if let directory {
@@ -34,14 +50,93 @@ public actor SessionStore {
         directory.appendingPathComponent("\(sessionID.uuidString).json", isDirectory: false)
     }
 
-    public func save(messages: [ChatMessage], sessionID: UUID) {
+    private var indexURL: URL {
+        directory.appendingPathComponent(Self.indexFileName, isDirectory: false)
+    }
+
+    // MARK: - 索引
+
+    private func readIndex() -> [SessionSummary] {
+        guard let data = try? Data(contentsOf: indexURL) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([SessionSummary].self, from: data)) ?? []
+    }
+
+    private func writeIndex(_ summaries: [SessionSummary]) {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let payload = Payload(messages: Self.trim(messages), updatedAt: Date())
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(summaries).write(to: indexURL, options: .atomic)
+        } catch {
+            print("[SessionStore] 索引写入失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// 会话列表，最近更新的在前。
+    /// 索引缺失或损坏时，从目录里的会话文件重建一次，避免"历史还在却看不到"。
+    public func list() -> [SessionSummary] {
+        var summaries = readIndex()
+        if summaries.isEmpty {
+            summaries = rebuildIndex()
+        }
+        return summaries.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private func rebuildIndex() -> [SessionSummary] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+        var summaries: [SessionSummary] = []
+        for file in files where file.pathExtension == "json" && file.lastPathComponent != Self.indexFileName {
+            guard let id = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { continue }
+            guard let data = try? Data(contentsOf: file) else { continue }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            guard let payload = try? decoder.decode(Payload.self, from: data) else { continue }
+            summaries.append(
+                SessionSummary(
+                    id: id,
+                    title: Self.deriveTitle(from: payload.messages),
+                    updatedAt: payload.updatedAt,
+                    messageCount: payload.messages.count
+                )
+            )
+        }
+        if !summaries.isEmpty {
+            writeIndex(summaries)
+        }
+        return summaries
+    }
+
+    // MARK: - 读写
+
+    public func save(messages: [ChatMessage], sessionID: UUID) {
+        guard !messages.isEmpty else { return }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let trimmed = Self.trim(messages)
+            let payload = Payload(messages: trimmed, updatedAt: Date())
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(payload)
             try data.write(to: fileURL(for: sessionID), options: .atomic)
+
+            var summaries = readIndex()
+            summaries.removeAll { $0.id == sessionID }
+            summaries.append(
+                SessionSummary(
+                    id: sessionID,
+                    title: Self.deriveTitle(from: trimmed),
+                    updatedAt: payload.updatedAt,
+                    messageCount: trimmed.count
+                )
+            )
+            writeIndex(summaries)
         } catch {
             // 持久化失败不应打断对话：内存里的历史仍然可用。
             print("[SessionStore] 保存失败：\(error.localizedDescription)")
@@ -61,6 +156,32 @@ public actor SessionStore {
 
     public func clear(sessionID: UUID) {
         try? FileManager.default.removeItem(at: fileURL(for: sessionID))
+        var summaries = readIndex()
+        summaries.removeAll { $0.id == sessionID }
+        writeIndex(summaries)
+    }
+
+    public func rename(sessionID: UUID, title: String) {
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        var summaries = readIndex()
+        guard let index = summaries.firstIndex(where: { $0.id == sessionID }) else { return }
+        summaries[index].title = String(cleaned.prefix(60))
+        writeIndex(summaries)
+    }
+
+    /// 会话标题取第一条用户消息的第一行，截断到 24 个字。没有用户消息时用时间兜底。
+    static func deriveTitle(from messages: [ChatMessage]) -> String {
+        if let first = messages.first(where: { $0.role == .user })?.content {
+            let line = first.split(separator: "\n").first.map(String.init) ?? first
+            let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !clean.isEmpty {
+                return String(clean.prefix(24))
+            }
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return "会话 " + formatter.string(from: Date())
     }
 
     /// 裁剪掉最老的消息，但**绝不切出半截工具批次**。

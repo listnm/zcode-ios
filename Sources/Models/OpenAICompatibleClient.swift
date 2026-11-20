@@ -44,6 +44,13 @@ public struct OpenAICompatibleClient: ModelClient {
                         body["tools"] = .array(Self.buildTools(tools))
                         body["tool_choice"] = .string("auto")
                     }
+                    // 可选参数：用户没填就不发，交给服务端默认值。
+                    if let temperature = provider.temperature {
+                        body["temperature"] = .number(temperature)
+                    }
+                    if let maxTokens = provider.maxOutputTokens, maxTokens > 0 {
+                        body["max_tokens"] = .number(Double(maxTokens))
+                    }
                     guard let data = ModelHTTP.encodeBody(body) else {
                         throw LLMError.badRequest(provider: name, detail: "请求体编码失败")
                     }

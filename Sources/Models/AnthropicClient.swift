@@ -43,10 +43,15 @@ public struct AnthropicClient: ModelClient {
 
                     var body: [String: JSONValue] = [
                         "model": .string(model),
-                        "max_tokens": .number(Double(Self.maxTokens)),
+                        // Anthropic 的 max_tokens 是必填项：用户没填时必须给一个兜底值。
+                        "max_tokens": .number(Double(provider.maxOutputTokens ?? Self.maxTokens)),
                         "stream": .bool(true),
                         "messages": .array(Self.buildMessages(messages))
                     ]
+
+                    if let temperature = provider.temperature {
+                        body["temperature"] = .number(temperature)
+                    }
 
                     var systemText = systemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     for message in messages where message.role == .system {

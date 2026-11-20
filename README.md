@@ -10,7 +10,7 @@
 
 - 源码仓库：<https://github.com/listnm/zcode-ios>
 - 构建流水线：GitHub Actions（`macos-15`）→ `xcodegen generate` → `xcodebuild -sdk iphoneos CODE_SIGNING_ALLOWED=NO` → 打包 `Payload/` 成 `ZCode-unsigned.ipa`
-- 最近一次构建：**成功**（run #2）。产出的 `ZCode-unsigned.ipa` 是 **arm64 设备包、未签名**，可直接用在自签工具里，但**不能直接装到 iPhone 上**——iOS 要求每个 App 都有有效签名。
+- 最近一次成功构建：run #3。产出的 `ZCode-unsigned.ipa` 是 **arm64 设备包、未签名**，可直接用在自签工具里，但**不能直接装到 iPhone 上**——iOS 要求每个 App 都有有效签名。
 - 本地（macOS）构建：`xcodegen generate && open ZCodeiOS.xcodeproj`，在 Xcode 里选真机 + 自己的开发者账号即可正常签名安装。
 
 ## 它做什么
@@ -40,7 +40,7 @@ Sources/
   Contracts/     JSONValue、工具契约、对话消息契约（全 Sendable）
   Models/        Provider 配置、Keychain、LLM 客户端（OpenAI 兼容 / Anthropic）
   Agent/         Agent 循环、事件、会话持久化
-  Workspace/     路径校验、security-scoped 授权、文件操作、四个工具
+  Workspace/     路径校验、security-scoped 授权、文件操作、9 个工具
   App/           组合根、确认中心、工作区状态
   UI/            对话页、设置页
 scripts/         push_to_github.py（无 git 环境下推送源码）
@@ -128,10 +128,38 @@ open ZCodeiOS.xcodeproj     # 选自己的 Team 后直接 Run
 | 模块 | 内容 | 状态 |
 | --- | --- | --- |
 | 阶段 0 | ZCode 架构锚点（真实源码校正） | 完成 `docs/00-zcode-architecture-anchor.md` |
-| 模块 A | 工作区（授权、路径边界、四个文件工具） | 完成 `docs/02-module-a-workspace.md` |
+| 模块 A | 工作区（授权、路径边界、文件工具） | 完成 `docs/02-module-a-workspace.md` |
 | 模块 B | 模型配置 + Keychain + 流式客户端 | 完成 |
 | 模块 C | Agent 循环、执行卡片、取消、会话持久化 | 完成 |
 | 模块 D | 对话 UI、设置页、空状态引导 | 完成 |
+| 功能扩展 | 图标、多会话、Markdown、用量统计、计划模式、9 个工具 | 完成 |
 | IPA | Actions 产出未签名包 / 可选签名包 | 已配置流水线 |
 
 `docs/03-delivery.md` 里有每个模块的自检清单与手动验证步骤。
+
+## 能力清单
+
+**内置工具（9 个，全部限定在工作区内）**
+
+| 工具 | 作用 | 只读 | 需要确认 |
+| --- | --- | --- | --- |
+| `list_files` | 列目录（可递归） | 是 | 否 |
+| `glob` | 按 glob 找文件路径，如 `**/*.swift` | 是 | 否 |
+| `grep` | 在文件内容里搜正则，输出 `文件:行: 文本` | 是 | 否 |
+| `read_file` | 读文本（可按字节上限截断） | 是 | 否 |
+| `write_file` | 写文件（覆盖已存在文件前确认） | 否 | 覆盖时 |
+| `make_dir` | 建目录（含中间层） | 否 | 是 |
+| `copy_file` | 复制文件 | 否 | 是 |
+| `move_file` | 移动 / 重命名 | 否 | 是 |
+| `delete_file` | 删除文件或目录 | 否 | 是 |
+
+**对话能力**
+
+- 多会话：任意新建、切换、重命名、删除；重启后从本地 JSON 恢复上一次会话。
+- 计划模式：只把只读工具交给模型，并在系统提示词里说明「不要尝试写入或删除」。
+- Markdown：代码围栏渲染成等宽块（可一键复制），正文走系统行内 Markdown 解析，不引入第三方库。
+- 用量统计：读取服务端返回的 input/output tokens，在顶栏显示本轮累计。
+- 执行卡片：每个 tool_call 一张卡，显示工具名、参数摘要、运行中 / 成功 / 失败 / 已取消，可展开看完整参数与结果。
+- 随时停止：网络请求与工具执行都响应 `Task.isCancelled`；停止后为未完成的 tool_call 补齐 `[cancelled]` 结果，保证历史里的调用与结果始终配对。
+
+**App 图标**：使用 ZCode 官方图标（白色 Z 字标 + 近黑底）。iOS 会自行加圆角遮罩，所以源图在 `Sources/Assets.xcassets/AppIcon.appiconset/icon-1024.png` 里已经压平到不透明背景上。

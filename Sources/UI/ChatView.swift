@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 对话主界面。三类内容共用一条时间线：user 气泡、assistant 气泡、tool_call 卡片。
 ///
@@ -9,6 +10,7 @@ public struct ChatView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var draft: String = ""
     @State private var expandedToolIDs: Set<String> = []
+    @State private var showingSessions = false
 
     public init() {}
 
@@ -30,7 +32,18 @@ public struct ChatView: View {
                     ModelPickerMenu(chat: chat, options: chat.availableOptions)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingSessions = true
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                    }
+                    .accessibilityLabel("历史会话")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button("新会话") {
+                            Task { await chat.newSession() }
+                        }
                         Button("清空当前会话", role: .destructive) {
                             Task { await chat.resetSession() }
                         }
@@ -39,6 +52,9 @@ public struct ChatView: View {
                         Image(systemName: "ellipsis.circle")
                     }
                 }
+            }
+            .sheet(isPresented: $showingSessions) {
+                SessionsView()
             }
         }
     }
@@ -56,6 +72,23 @@ public struct ChatView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
+            if chat.totalTokens > 0 {
+                Text(Self.formatTokens(chat.totalTokens))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
+                    .accessibilityLabel("本会话已用 \(chat.totalTokens) tokens")
+            }
+            if chat.isPlanMode {
+                Text("计划")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.blue.opacity(0.12), in: Capsule())
+            }
             if let option = chat.currentOption {
                 Text(option.modelID)
                     .font(.caption2)
@@ -67,6 +100,15 @@ public struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    /// 12_345 → "12.3k"。超过一万才缩写，少于一千保持原样，避免小数字变形。
+    static func formatTokens(_ value: Int) -> String {
+        if value < 1_000 { return "\(value) tok" }
+        if value < 10_000 {
+            return String(format: "%.1fk", Double(value) / 1_000)
+        }
+        return String(format: "%.0fk", Double(value) / 1_000)
     }
 
     // MARK: - 消息列表
@@ -180,7 +222,9 @@ public struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(chat.messages) { message in
-                        row(for: message).id(message.id)
+                        row(for: message)
+                            .id(message.id)
+                            .contextMenu { contextMenu(for: message) }
                     }
 
                     if !chat.streamingText.isEmpty {
@@ -215,6 +259,25 @@ public struct ChatView: View {
             .onChange(of: chat.isRunning) { _, running in
                 if running { proxy.scrollTo("thinking", anchor: .bottom) }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func contextMenu(for message: ChatMessage) -> some View {
+        Button {
+            UIPasteboard.general.string = message.content
+        } label: {
+            Label("复制内容", systemImage: "doc.on.doc")
+        }
+        .disabled(message.content.isEmpty)
+
+        if message.role == .assistant {
+            Button {
+                chat.regenerate(workspaceName: environment.workspace.snapshot.displayName)
+            } label: {
+                Label("重新生成", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(chat.isRunning)
         }
     }
 
@@ -276,6 +339,24 @@ public struct ChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
+
+            HStack(spacing: 10) {
+                Toggle(isOn: Binding(
+                    get: { chat.isPlanMode },
+                    set: { chat.isPlanMode = $0 }
+                )) {
+                    Label("计划模式（只读）", systemImage: "doc.text.magnifyingglass")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .disabled(chat.isRunning)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
 
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("让 Agent 做点什么…", text: $draft, axis: .vertical)
@@ -357,9 +438,7 @@ struct AssistantBubble: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
-            Text(text + (isStreaming ? " ▍" : ""))
-                .font(.body)
-                .textSelection(.enabled)
+            MarkdownText(text: text, isStreaming: isStreaming)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
         }

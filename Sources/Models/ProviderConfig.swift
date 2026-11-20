@@ -42,6 +42,13 @@ public struct ModelProvider: Identifiable, Codable, Sendable, Equatable {
     public var models: [String]
     public var defaultModel: String
     public var isEnabled: Bool
+    /// 采样温度。nil = 不发给服务端，用服务端默认值。
+    ///
+    /// 为什么不给一个"合理默认"：不同厂商的默认值差异很大（有的 1.0，有的 0.7，
+    /// 推理模型甚至不接受这个参数）。留 nil 让服务端决定，才是真正可移植的做法。
+    public var temperature: Double?
+    /// 单次回复的最大输出 token 数。nil = 用协议默认值（Anthropic 必须给，见客户端）。
+    public var maxOutputTokens: Int?
 
     public init(
         id: UUID = UUID(),
@@ -50,7 +57,9 @@ public struct ModelProvider: Identifiable, Codable, Sendable, Equatable {
         baseURL: String,
         models: [String] = [],
         defaultModel: String = "",
-        isEnabled: Bool = true
+        isEnabled: Bool = true,
+        temperature: Double? = nil,
+        maxOutputTokens: Int? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -59,6 +68,8 @@ public struct ModelProvider: Identifiable, Codable, Sendable, Equatable {
         self.models = models
         self.defaultModel = defaultModel
         self.isEnabled = isEnabled
+        self.temperature = temperature
+        self.maxOutputTokens = maxOutputTokens
     }
 
     /// 规范化后的 Base URL：去空白、去尾斜杠。

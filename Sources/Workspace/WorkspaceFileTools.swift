@@ -288,12 +288,21 @@ public struct DeleteFileTool: AgentTool {
 
 /// 一期工具集。故意保持极简：只覆盖「工作区文件操作」，
 /// 不移植 exec / http / browser / mcp / image / pdf（锚点 §8 非目标）。
+///
+/// 九个工具：4 个基础读写删 + 5 个检索/结构变更。
+/// 顺序有意义：只读工具排在前面，写工具在后面——系统提示词按这个顺序给模型列能力，
+/// 先读后写是我们在提示里反复强调的行为约束，工具表顺序与它保持一致。
 public enum WorkspaceToolFactory {
     public static func makeAll(dependencies: WorkspaceToolDependencies) -> [any AgentTool] {
         [
             ListFilesTool(dependencies: dependencies),
+            GlobTool(dependencies: dependencies),
+            GrepTool(dependencies: dependencies),
             ReadFileTool(dependencies: dependencies),
             WriteFileTool(dependencies: dependencies),
+            MakeDirectoryTool(dependencies: dependencies),
+            CopyFileTool(dependencies: dependencies),
+            MoveFileTool(dependencies: dependencies),
             DeleteFileTool(dependencies: dependencies)
         ]
     }

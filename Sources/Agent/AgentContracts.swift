@@ -87,6 +87,8 @@ public enum AgentEvent: Sendable {
     case assistantCommitted(ChatMessage)
     /// 一条工具结果已写入历史（与 tool_call 配对）。
     case toolCommitted(ChatMessage)
+    /// 本轮模型用量（token 计数）。不是终态，只是统计。
+    case usage(TokenUsage)
     /// 回合结束。
     case finished(TurnOutcome)
 }

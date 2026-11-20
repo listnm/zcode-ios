@@ -107,3 +107,13 @@
 | D-01 | iOS 一期**串行**执行本批工具，不做并行调度 | 四个工具里 write/delete 触碰 workspace 域，本来就不满足并行条件；串行让取消检查点与卡片状态机简单一个量级 | 仅吞吐，不改语义。二期加 `grep` 等只读工具再按 ZCode 规则分组 |
 | D-02 | 权限规则集一期只做 `user-once` / `session-always-allow`，不做持久 `allow/deny` 编辑 | 真机上持久授权价值低、UI 成本高 | 用户每次删除仍需确认（更严，不会更松） |
 | D-03 | 工具名用 `list_files/read_file/write_file/delete_file`，不用 ZCode 的 `Read/Write/Glob` | 对模型更直观，且一期只有四个工具不会有歧义 | capability 元数据必须与 ZCode 等价（见锚点 §3.2 表） |
+
+### 2026-11-20 功能扩展（v3）
+
+- 图标：接入 ZCode 官方 Z 字标，压平为不透明 1024x1024，通过 Assets.xcassets + ASSETCATALOG_COMPILER_APPICON_NAME 生效。
+- 会话：SessionStore 增加 index.json 索引，支持新建/切换/重命名/删除；ChatModel 的 sessionID 持久化到 UserDefaults。
+- Markdown：新增 MarkdownText（围栏代码块 + 行内 Markdown + 复制按钮），替换纯 Text 气泡。
+- 用量：AgentEvent 增加 usage，顶栏显示累计 tokens。
+- 计划模式：只在只读工具集合里调度，并在系统提示词里说明。
+- 工具：4 个扩展到 9 个（新增 glob / grep / make_dir / copy_file / move_file），只读在前、写在后。
+- 模型参数：Provider 增加可选 temperature / maxOutputTokens，客户端按需注入。
